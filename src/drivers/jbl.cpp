@@ -1,5 +1,9 @@
-// JBL Quantum 520 / 650 / 850 / 950 (and X variants) headsets, vendor 0ECB, "HIDV3" protocol on the
-// vendor collection with usage page FF12 (64-byte reports: input 86, output 87, feature 88).
+// JBL Quantum 360X, 520 / 650 / 850 / 950 (and X variants) headsets, vendor 0ECB.
+// Quantum 360X: HIDV1 feature 68 = wireless link, feature 49 = battery percent.
+// https://github.com/Cluxnei/omarchy-jbl-quantum#protocol-notes documents this protocol for the
+// Quantum 360; the 360X 20A5 interface and 95% battery response were checked on a real unit.
+// The 520 / 650 / 850 / 950 models use "HIDV3" on usage page FF12 (64-byte reports: input 86,
+// output 87, feature 88).
 //   request (feature 88): [88][00 DD][01 00][01][00][02 00][feature lo][feature hi]
 //            identifier DD00 = the device itself, command 0001 = get device info, 1 packet, index 0,
 //            payload = the 2-byte feature id
@@ -14,6 +18,7 @@
 namespace {
 
 constexpr USHORT kVid = 0x0ECB;
+constexpr USHORT kQuantum360X = 0x20A5;
 constexpr USHORT kBatteryFeature = 0x000D;
 
 struct Model { USHORT pid; const wchar_t* name; bool dongle; };
@@ -49,9 +54,34 @@ bool GetBattery(HidDev& d, BYTE& info) {
     return false;
 }
 
+void PollQuantum360X(PollContext& ctx) {
+    if (ctx.IsClaimed(kVid, kQuantum360X)) return;
+    for (const HidColl* c : ctx.Find(kVid, kQuantum360X, [](const HidColl& c) {
+             // Observed receiver collection; another interface with this PID is telephony HID.
+             return c.iface == 5 && c.page() == 0x0001 && c.usage() == 0 &&
+                    c.inLen() == 2 && c.outLen() == 64 && c.featLen() == 64;
+         })) {
+        HidDev d;
+        if (!d.OpenFeatureOnly(*c)) continue;
+        std::vector<BYTE> link, battery;
+        if (!d.GetFeature(0x68, link) || link.size() < 2 || link[0] != 0x68 || link[1] != 1) continue;
+        if (!d.GetFeature(0x49, battery) || battery.size() < 2 || battery[0] != 0x49 || battery[1] > 100) continue;
+        DeviceStatus s;
+        s.key = L"jbl360x:" + Hex4(kQuantum360X);
+        s.name = L"JBL Quantum 360X";
+        s.kind = DeviceKind::Headset;
+        s.via = L"2.4 GHz receiver";
+        s.percent = battery[1];
+        // HIDV1 charging state is not known; do not infer it from the battery percentage.
+        ctx.Add(s, kVid, kQuantum360X);
+        break;
+    }
+}
+
 }  // namespace
 
 void PollJbl(PollContext& ctx) {
+    PollQuantum360X(ctx);
     for (const Model& m : kModels) {
         if (ctx.IsClaimed(kVid, m.pid)) continue;
         for (const HidColl* c : ctx.Find(kVid, m.pid, [](const HidColl& c) {

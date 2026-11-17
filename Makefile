@@ -41,5 +41,7 @@ test:
 	./build/galaxy_buds_protocol_test.exe
 	$(CXX) -std=c++17 -O2 -Wall tests/logitech_g435_0adf_test.cpp -o build/logitech_g435_0adf_test.exe
 	./build/logitech_g435_0adf_test.exe
+	$(CXX) $(CXXFLAGS) tests/jbl_driver_test.cpp src/drivers/jbl.cpp -o build/jbl_driver_test.exe
+	./build/jbl_driver_test.exe
 
 .PHONY: clean test
